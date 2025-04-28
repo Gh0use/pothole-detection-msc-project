@@ -1,0 +1,172 @@
+
+Project Artefact File
+
+This file contains the main artefacts developed for the MSc Final Project:
+- YOLOv5 Training configuration and commands,
+- Dataset setup and preprocessing script,
+- Streamlit Web Application code,
+- CNN, SVM, and Random Forest model training,
+- Summary of manual testing activities.
+
+Note:
+The trained YOLOv5 model (best.pt) and YOLOv8 model weights are available locally but not submitted due to file size constraints. They can be provided upon request.
+
+----------------------------------------
+1. YOLOv5 Training Commands (Used in Google Colab)
+
+# Clone YOLOv5 repository and install requirements
+!git clone https://github.com/ultralytics/yolov5
+%cd yolov5
+!pip install -r requirements.txt
+
+# Train YOLOv5 model with Andrew MVD dataset
+!python train.py --img 640 --batch 16 --epochs 50 --data pothole.yaml --weights yolov5s.pt --name pothole_detect
+
+----------------------------------------
+2. YOLOv5 Dataset Configuration File (pothole.yaml)
+
+# pothole.yaml - Dataset paths and labels
+
+path: C:/Users/theon/OneDrive/Desktop/Pothole MSc Project/dataset/dataset1
+train: images
+val: images
+
+nc: 1
+names: ['pothole']
+
+----------------------------------------
+3. Dataset Combination Script (combine_dataset.py)
+
+# Script to combine two datasets into a new training set
+
+import os
+import shutil
+import random
+from PIL import Image
+
+dataset1_path = 'C:/Users/theon/OneDrive/Desktop/Pothole MSc Project/dataset/dataset1'
+dataset2_path = 'C:/Users/theon/OneDrive/Desktop/Pothole MSc Project/dataset/dataset2'
+combined_path = 'C:/Users/theon/OneDrive/Desktop/Pothole MSc Project/dataset/combined_dataset'
+
+os.makedirs(os.path.join(combined_path, 'images', 'train'), exist_ok=True)
+os.makedirs(os.path.join(combined_path, 'labels', 'train'), exist_ok=True)
+
+# Copy images and labels, shuffle and split into train and validation
+
+----------------------------------------
+4. Streamlit Web Application Code
+
+# Streamlit application to detect potholes using YOLOv5
+
+import streamlit as st
+import torch
+from PIL import Image
+import numpy as np
+import cv2
+from ultralytics import YOLO
+
+model = YOLO('best.pt')
+
+st.set_page_config(page_title="Pothole Detection App", layout="wide")
+
+uploaded_file = st.file_uploader("Upload a road image", type=["jpg", "jpeg", "png"])
+
+if uploaded_file:
+    img = np.array(Image.open(uploaded_file))
+    results = model(img)
+
+    for box in results[0].boxes.xyxy.cpu().numpy():
+        x1, y1, x2, y2 = map(int, box[:4])
+        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+    st.image(img, caption="Detected potholes", use_column_width=True)
+
+----------------------------------------
+5. CNN, SVM and Random Forest Model Training Script
+
+# Import libraries
+import os
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier
+from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+import joblib
+
+# Load dataset
+dataset_root = r"C:\Users\theon\OneDrive\Desktop\pothole detection\Normal pothole dataset\Neha Pothole and normal dataset"
+normal_path = os.path.join(dataset_root, "Normal")
+pothole_path = os.path.join(dataset_root, "Pothole")
+
+if not os.path.exists(normal_path) or not os.path.exists(pothole_path):
+    raise FileNotFoundError("Dataset folders not found.")
+
+def load_images(folder, label, img_size=(128, 128)):
+    images, labels = [], []
+    for filename in os.listdir(folder):
+        img = cv2.imread(os.path.join(folder, filename))
+        if img is not None:
+            img = cv2.resize(img, img_size)
+            img = img / 255.0
+            images.append(img)
+            labels.append(label)
+    return images, labels
+
+normal_images, normal_labels = load_images(normal_path, label=0)
+pothole_images, pothole_labels = load_images(pothole_path, label=1)
+
+X = np.array(normal_images + pothole_images)
+y = np.array(normal_labels + pothole_labels)
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+y_train_cnn = to_categorical(y_train, num_classes=2)
+y_test_cnn = to_categorical(y_test, num_classes=2)
+
+cnn_model = Sequential([
+    Conv2D(32, (3,3), activation='relu', input_shape=(128, 128, 3)),
+    MaxPooling2D(2,2),
+    Conv2D(64, (3,3), activation='relu'),
+    MaxPooling2D(2,2),
+    Flatten(),
+    Dense(128, activation='relu'),
+    Dropout(0.5),
+    Dense(2, activation='softmax')
+])
+
+cnn_model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+cnn_model.fit(X_train, y_train_cnn, epochs=10, batch_size=32, validation_data=(X_test, y_test_cnn))
+
+cnn_loss, cnn_accuracy = cnn_model.evaluate(X_test, y_test_cnn)
+cnn_preds = np.argmax(cnn_model.predict(X_test), axis=1)
+cnn_precision = precision_score(y_test, cnn_preds)
+cnn_recall = recall_score(y_test, cnn_preds)
+cnn_f1 = f1_score(y_test, cnn_preds)
+
+X_flat = X.reshape(len(X), -1)
+X_train_flat, X_test_flat, y_train_flat, y_test_flat = train_test_split(X_flat, y, test_size=0.2, random_state=42)
+
+svm_model = SVC(kernel='linear')
+svm_model.fit(X_train_flat, y_train_flat)
+svm_preds = svm_model.predict(X_test_flat)
+
+rf_model = RandomForestClassifier(n_estimators=100)
+rf_model.fit(X_train_flat, y_train_flat)
+rf_preds = rf_model.predict(X_test_flat)
+
+# Save models
+cnn_model.save("best_model_cnn.h5")
+joblib.dump(svm_model, "best_model_svm.pkl")
+joblib.dump(rf_model, "best_model_rf.pkl")
+
+----------------------------------------
+6. Manual Testing Summary
+
+- Model loading verified (best.pt loads properly).
+- Tested file uploads, detection, output rendering.
+- Checked app across browsers (Chrome, Edge).
+- No formal unit testing scripts developed separately.
